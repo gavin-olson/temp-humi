@@ -10,10 +10,18 @@ use File::Temp;
 
 my $cgi = new CGI;
 
+my $field;
+if(defined $cgi->param('field')) {
+	$field = $cgi->param('field');
+	$field =~ s/[^a-zA-Z0-9]//g;
+} else {
+	$field = 'temp';
+}
+
 my $offset;
 if(defined $cgi->param('offset')) {
 	$offset = $cgi->param('offset');
-	$offset =~ s/[^-0-9]//;
+	$offset =~ s/[^-0-9]//g;
 } else {
 	$offset = 0;
 }
@@ -21,26 +29,31 @@ if(defined $cgi->param('offset')) {
 my $range;
 if(defined $cgi->param('range')) {
 	$range = $cgi->param('range');
-	$range =~ s/[^-0-9]//;
+	$range =~ s/[^-0-9]//g;
 } else {
 	$range = -1;
 }
 
-print STDERR "offset => $offset, range => $range\n";
+print STDERR "field => $field, offset => $offset, range => $range\n";
 
-my $formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d');
-my $end_date = DateTime->now(time_zone => 'local', formatter => $formatter)->subtract(seconds => $offset);
+my $date_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d');
+my $datetime_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d-%H:%M:%S');
+
+my $end_date = DateTime->now(time_zone => 'local', formatter => $datetime_formatter)->subtract(seconds => $offset);
 my $start_date = 
 	($range > 0) ? 
 		$end_date->clone()->subtract(seconds => $range) : 
-		DateTime->new(year => '2022', formatter => $formatter);
+		DateTime->new(year => '2022', formatter => $datetime_formatter);
 my @dates;
-while($start_date <= $end_date) {
-	push @dates, $start_date->clone();
-	$start_date->add(days => 1);
+for(my $cursor_date = $start_date->clone()->set_formatter($date_formatter); $cursor_date <= $end_date; $cursor_date->add(days => 1)) {
+	push @dates, $cursor_date->clone();
 }
 
+print STDERR "Time from $start_date to $end_date\n";
+
 my %data;
+print STDERR join ',', @dates;
+print STDERR "\n";
 for my $date (@dates) {
 	open my $file, '<', "/var/log/temp-humi-$date.dat" or next;
 	while(<$file>) {
@@ -56,37 +69,17 @@ for my $date (@dates) {
 }
 
 my $plotfile = File::Temp->new(SUFFIX => '.svg', UNLINK => 0);
-my $multiplot = Chart::Gnuplot->new(
+my $plot = Chart::Gnuplot->new(
 	output   => $plotfile->filename,
-	terminal => 'svg size 1024,1536',
-#	timestamp => { fmt => '%m/%d %H:%M' }, #Format for display
-#	timeaxis => 'x',
-#	xtics => { rotate => -45 },
-#	legend => { position => 'outside' },
-);
-my @plots;
-#my $temp_plot = Chart::Gnuplot->new(
-print STDERR "Instantiating sub-plots\n";
-$plots[0] = Chart::Gnuplot->new(
+	title => $field,
+	terminal => 'svg size 1024,512',
 	timestamp => { fmt => '%m/%d %H:%M' }, #Format for display
 	timeaxis => 'x',
 	xtics => { rotate => -45 },
+	xrange => [ $start_date, $end_date ],
 	legend => { position => 'outside' },
 );
-#my $humidity_plot = Chart::Gnuplot->new(
-$plots[1] = Chart::Gnuplot->new(
-	timestamp => { fmt => '%m/%d %H:%M' }, #Format for display
-	timeaxis => 'x',
-	xtics => { rotate => -45 },
-	legend => { position => 'outside' },
-);
-#my $pressure_plot = Chart::Gnuplot->new(
-$plots[2] = Chart::Gnuplot->new(
-	timestamp => { fmt => '%m/%d %H:%M' }, #Format for display
-	timeaxis => 'x',
-	xtics => { rotate => -45 },
-	legend => { position => 'outside' },
-);
+
 
 my %datasets;
 my %hostnames = (
@@ -96,48 +89,23 @@ my %hostnames = (
 	'192.168.135.193' => 'Living Room',
 	'192.168.135.194' => 'Office',
 );
-print STDERR "Creating datasets\n";
-for my $host (keys %data) {
-	my @timestamps = map { $_->{'timestamp'} } @{$data{$host}};
-	my @temps = map { $_->{'temp'} } @{$data{$host}};
-	my @humidities = map { $_->{'humidity'} } @{$data{$host}};
-	my @pressures = map { $_->{'pressure'} } @{$data{$host}};
-	push @{$datasets{'temp'}}, Chart::Gnuplot::DataSet->new(
-		title => $hostnames{$host},
-		xdata => \@timestamps, 
-		ydata => \@temps, 
-		style => 'lines',
-		timefmt => '%Y-%m-%d-%H:%M:%S' #Format of input file
-	);
-	push @{$datasets{'humidity'}}, Chart::Gnuplot::DataSet->new(
-		title => $hostnames{$host},
-		xdata => \@timestamps, 
-		ydata => \@humidities, 
-		style => 'lines',
-		timefmt => '%Y-%m-%d-%H:%M:%S' #Format of input file
-	);
-	push @{$datasets{'pressure'}}, Chart::Gnuplot::DataSet->new(
-		title => $hostnames{$host},
-		xdata => \@timestamps, 
-		ydata => \@pressures, 
-		style => 'lines',
-		timefmt => '%Y-%m-%d-%H:%M:%S' #Format of input file
-	);
+for my $host (sort keys %data) {
+	my @series_data = grep { $_->{$field} ne '' } @{$data{$host}};
+	my @field_data = map { $_->{$field} } @series_data;
+	my @timestamp_data = map { $_->{'timestamp'} } @series_data;
+
+	if(@field_data > 0) {
+		push @{$datasets{$field}}, Chart::Gnuplot::DataSet->new(
+	 		title => $hostnames{$host},
+			xdata => \@timestamp_data, 
+			ydata => \@field_data, 
+			style => 'lines',
+			timefmt => '%Y-%m-%d-%H:%M:%S' #Format of input file
+		);
+	}
 }
 
-#$temp_plot->add2d(@{$datasets{'temp'}});
-#$humidity_plot->add2d(@{$datasets{'humidities'}});
-#$pressure_plot->add2d(@{$datasets{'pressures'}});
-print STDERR "Plotting datasets\n";
-$plots[0]->add2d(@{$datasets{'temp'}}->[0]);
-$plots[1]->add2d(@{$datasets{'humidities'}}->[0]);
-$plots[2]->add2d(@{$datasets{'pressures'}}->[0]);
-#my @plots = ($temp_plot, $humidity_plot, $pressure_plot);
-print STDERR "Multiplotting\n";
-$multiplot->multiplot(@plots);
-#$multiplot->plot2d(@{$datasets{'temp'}});
-
-print STDERR "CGI-ing\n";
+$plot->plot2d(@{$datasets{$field}});
 
 print $cgi->header(-type=>'image/svg+xml');
 while(<$plotfile>) { print }
