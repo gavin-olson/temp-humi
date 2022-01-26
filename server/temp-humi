@@ -1,0 +1,4 @@
+#!/bin/bash
+
+#socat UDP-RECVFROM:1234,fork STDOUT | xargs -I {} bash -c 'echo "$(date +%Y-%m-%d-%T),{}"' >> /var/log/temp-humi.dat
+socat UDP-RECVFROM:1234,fork STDOUT | while read line; do echo "$(date +%Y-%m-%d-%T),$line" >> /var/log/temp-humi-$(date +%Y-%m-%d).dat; done
