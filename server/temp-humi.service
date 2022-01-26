@@ -1,0 +1,10 @@
+[Unit]
+Description=Monitor for and record messages from temp-humi sensors
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/temp-humi
+
+[Install]
+WantedBy=multi-user.target
