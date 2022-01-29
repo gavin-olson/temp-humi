@@ -1,5 +1,9 @@
 #!/usr/bin/perl
 
+use Time::HiRes qw/ time /;
+
+my $last_time = time;
+
 use warnings;
 use strict;
 use CGI;
@@ -7,6 +11,10 @@ use DateTime;
 use DateTime::Format::Strptime;
 use Chart::Gnuplot;
 use File::Temp;
+
+my $this_time = time;
+print STDERR sprintf("Use statements: %fs\n", $this_time-$last_time );
+$last_time = $this_time;
 
 my $cgi = new CGI;
 
@@ -34,7 +42,9 @@ if(defined $cgi->param('range')) {
 	$range = -1;
 }
 
-print STDERR "field => $field, offset => $offset, range => $range\n";
+$this_time = time;
+print STDERR sprintf("Read CGI parameters: %fs\n", $this_time-$last_time );
+$last_time = $this_time;
 
 my $date_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d');
 my $datetime_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d-%H:%M:%S');
@@ -49,11 +59,11 @@ for(my $cursor_date = $start_date->clone()->set_formatter($date_formatter); $cur
 	push @dates, $cursor_date->clone();
 }
 
-print STDERR "Time from $start_date to $end_date\n";
+$this_time = time;
+print STDERR sprintf("Generate date list: %fs\n", $this_time-$last_time );
+$last_time = $this_time;
 
 my %data;
-print STDERR join ',', @dates;
-print STDERR "\n";
 for my $date (@dates) {
 	open my $file, '<', "/var/log/temp-humi-$date.dat" or next;
 	while(<$file>) {
@@ -68,44 +78,70 @@ for my $date (@dates) {
 	}
 }
 
-my $plotfile = File::Temp->new(SUFFIX => '.svg', UNLINK => 0);
-my $plot = Chart::Gnuplot->new(
-	output   => $plotfile->filename,
-	title => $field,
-	terminal => 'svg size 1024,512',
-	timestamp => { fmt => '%m/%d %H:%M' }, #Format for display
-	timeaxis => 'x',
-	xtics => { rotate => -45 },
-	xrange => [ $start_date, $end_date ],
-	legend => { position => 'outside' },
+$this_time = time;
+print STDERR sprintf("Ingest data: %fs\n", $this_time-$last_time );
+$last_time = $this_time;
+
+my $plotfile = File::Temp->new(SUFFIX => '.svg');
+my $multiplot = Chart::Gnuplot->new(
+	output    => $plotfile->filename,
+	terminal  => 'svg size 1024,1536',
 );
 
-
-my %datasets;
 my %hostnames = (
-	'192.168.135.190' => 'Garage',
-	'192.168.135.191' => 'Basement',
-	'192.168.135.192' => 'Bedroom',
-	'192.168.135.193' => 'Living Room',
-	'192.168.135.194' => 'Office',
+	'192.168.135.190' => { name => 'Garage', color => 'red' },
+	'192.168.135.191' => { name => 'Basement', color => 'blue' },
+	'192.168.135.192' => { name => 'Bedroom', color => 'green' },
+	'192.168.135.193' => { name => 'Living Room', color => 'orange' },
+	'192.168.135.194' => { name => 'Office', color => 'cyan' }
 );
-for my $host (sort keys %data) {
-	my @series_data = grep { $_->{$field} ne '' } @{$data{$host}};
-	my @field_data = map { $_->{$field} } @series_data;
-	my @timestamp_data = map { $_->{'timestamp'} } @series_data;
+my @plots;
+my $xtic_fmt = '%H:%M';
+if($range >= 86400) {
+	$xtic_fmt = "%m/%d $xtic_fmt";
+}
+for my $field ('temp','humidity','pressure') {
+	my $plot = Chart::Gnuplot->new(
+		title     => ucfirst $field,
+		timeaxis  => 'x',
+		xtics     => { rotate => -45, labelfmt => $xtic_fmt },
+		xrange    => [ $start_date, $end_date ],
+		grid      => { width => 1, linetype => 'dot', color => 'gray' },
+		legend    => { position => 'outside' },
+	);
 
-	if(@field_data > 0) {
-		push @{$datasets{$field}}, Chart::Gnuplot::DataSet->new(
-	 		title => $hostnames{$host},
-			xdata => \@timestamp_data, 
-			ydata => \@field_data, 
-			style => 'lines',
-			timefmt => '%Y-%m-%d-%H:%M:%S' #Format of input file
-		);
+	my @datasets;
+	for my $host (sort keys %data) {
+		my @series_data = grep { $_->{$field} ne '' } @{$data{$host}};
+		my @field_data = map { $_->{$field} } @series_data;
+		my @timestamp_data = map { $_->{'timestamp'} } @series_data;
+
+		if(@field_data > 0) {
+			push @datasets, Chart::Gnuplot::DataSet->new(
+	 			title => $hostnames{$host}->{'name'},
+	 			color => $hostnames{$host}->{'color'},
+				xdata => \@timestamp_data, 
+				ydata => \@field_data, 
+				style => 'lines',
+				timefmt => '%Y-%m-%d-%H:%M:%S' #Format of input file
+			);
+		}
 	}
+	$plot->add2d(@datasets);
+	push @plots, [$plot];
 }
 
-$plot->plot2d(@{$datasets{$field}});
+# Multiplot wants a 2D array of plot objects or a reference to an array of
+# array references to define the matrix of sub-plots
+$multiplot->multiplot(\@plots);
+
+$this_time = time;
+print STDERR sprintf("Plot data: %fs\n", $this_time-$last_time );
+$last_time = $this_time;
 
 print $cgi->header(-type=>'image/svg+xml');
 while(<$plotfile>) { print }
+
+$this_time = time;
+print STDERR sprintf("Dump plot to CGI: %fs\n", $this_time-$last_time );
+$last_time = $this_time;
