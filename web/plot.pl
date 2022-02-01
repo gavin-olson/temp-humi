@@ -1,30 +1,19 @@
 #!/usr/bin/perl
 
 use Time::HiRes qw/ time /;
-
-my $last_time = time;
-
 use warnings;
 use strict;
-use CGI;
+use CGI::Fast qw/ :standard /;
 use DateTime;
 use DateTime::Format::Strptime;
 use Chart::Gnuplot;
 use File::Temp;
 
-my $this_time = time;
-print STDERR sprintf("Use statements: %fs\n", $this_time-$last_time );
-$last_time = $this_time;
+sub process_request {
+my $last_time = time;
 
-my $cgi = new CGI;
-
-my $field;
-if(defined $cgi->param('field')) {
-	$field = $cgi->param('field');
-	$field =~ s/[^a-zA-Z0-9]//g;
-} else {
-	$field = 'temp';
-}
+#my $cgi = new CGI;
+my $cgi = shift;
 
 my $offset;
 if(defined $cgi->param('offset')) {
@@ -42,9 +31,12 @@ if(defined $cgi->param('range')) {
 	$range = -1;
 }
 
-$this_time = time;
+my $this_time = time;
 print STDERR sprintf("Read CGI parameters: %fs\n", $this_time-$last_time );
 $last_time = $this_time;
+
+#$offset = 0;
+#$range = 3600;
 
 my $date_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d');
 my $datetime_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d-%H:%M:%S');
@@ -60,7 +52,7 @@ for(my $cursor_date = $start_date->clone()->set_formatter($date_formatter); $cur
 }
 
 $this_time = time;
-print STDERR sprintf("Generate date list: %fs\n", $this_time-$last_time );
+print STDERR sprintf("Generate date list of %d entries: %fs\n", scalar @dates, $this_time-$last_time );
 $last_time = $this_time;
 
 my %data;
@@ -69,6 +61,7 @@ for my $date (@dates) {
 	while(<$file>) {
 		my @fields = split ',';
 	    push @{$data{$fields[1]}}, {
+			#'timestamp' => $datetime_formatter->parse_datetime($fields[0]),
 			'timestamp' => $fields[0],
 		    'temp'      => $fields[2],
 		    'humidity'  => $fields[4],
@@ -115,7 +108,7 @@ for my $field ('temp','humidity','pressure') {
 		my @series_data = grep { $_->{$field} ne '' } @{$data{$host}};
 		my @field_data = map { $_->{$field} } @series_data;
 		my @timestamp_data = map { $_->{'timestamp'} } @series_data;
-
+		
 		if(@field_data > 0) {
 			push @datasets, Chart::Gnuplot::DataSet->new(
 	 			title => $hostnames{$host}->{'name'},
@@ -131,6 +124,10 @@ for my $field ('temp','humidity','pressure') {
 	push @plots, [$plot];
 }
 
+$this_time = time;
+print STDERR sprintf("Generate datasets/subplots: %fs\n", $this_time-$last_time );
+$last_time = $this_time;
+
 # Multiplot wants a 2D array of plot objects or a reference to an array of
 # array references to define the matrix of sub-plots
 $multiplot->multiplot(\@plots);
@@ -145,3 +142,11 @@ while(<$plotfile>) { print }
 $this_time = time;
 print STDERR sprintf("Dump plot to CGI: %fs\n", $this_time-$last_time );
 $last_time = $this_time;
+
+#print STDERR sprintf("TTL time: %fs\n", $this_time-$ttl_start );
+}
+
+while(my $cgi = CGI::Fast->new) {
+	process_request($cgi);
+}
+
