@@ -1,0 +1,29 @@
+<html>
+<head>
+<title>GavHouse Environmental Monitoring</title>
+</head>
+<body>
+<h1>GavHouse Environmental Monitoring</h1>
+<div style="width: 1024; margin: 0 auto;">
+<span style="align: center;">
+	<a href="?range=3600&offset=0">Hour</a> | 
+	<a href="?range=86400&offset=0">Day</a> | 
+	<a href="?range=604800&offset=0">Week</a> |
+	<a href="?range=2592000&offset=0">Month</a> |
+	<a href="?range=-1">All</a> | 
+	<a href="?range={{ range }}&offset={{ offset+range }}">&lt;</a> | 
+	<a href="?range={{ range }}&offset={{ offset-range }}">&gt;</a> |
+	<a href="?range={{ range }}&offset=0">&gt;&gt;</a>
+</span><br />
+<span>Displaying from {{ start_date }} to {{ end_date }}</span><br />
+<div id="temp_chart">
+    <embed type="image/svg+xml" src= {{ temp_chart|safe }} />
+</div>
+<div id="humi_chart">
+    <embed type="image/svg+xml" src= {{ humi_chart|safe }} />
+</div>
+<div id="press_chart">
+    <embed type="image/svg+xml" src= {{ press_chart|safe }} />
+</div>
+</body>
+</html>
