@@ -128,13 +128,9 @@ void setup() {
   start_sensors();
 
   do_sensors();
-
-  // Traditional sleep for 1 second to let the UDP send, then deep sleep for the rest of the minute
-  delay(1000);
-  ESP.deepSleep(59000000, WAKE_RF_DEFAULT);
 }
 
 void loop() {
-  //do_sensors();
-  //delay(60000);
+  do_sensors();
+  delay(60000);
 }
