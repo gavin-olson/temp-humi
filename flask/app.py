@@ -4,12 +4,15 @@ from flask import render_template
 from flask import send_file
 
 import pygal
+import os
 
 from datetime import date
 from datetime import datetime
 from datetime import timedelta
 
 from collections import Counter
+
+import pandas as pd
 
 app = Flask(__name__)
 
@@ -35,9 +38,12 @@ def index():
     
     # Compute time-axis endpoints for graphs
     end_date = datetime.today() - timedelta(seconds=offset)
+    app.logger.info(f"end_date => {end_date}")
     if period >= 86400:
         end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    app.logger.info(f"end_date => {end_date}")
     start_date = end_date - timedelta(seconds=period)
+    app.logger.info(f"start_date => {start_date}")
     
     # Initialize data structures
     data = {}
@@ -50,49 +56,25 @@ def index():
 
     # Read loop
     this_date = start_date
+    data = pd.DataFrame()
     while this_date <= end_date:
-        try:
-            this_file = open("/var/log/temp-humi-%s.dat" % this_date.strftime('%Y-%m-%d'))
-        except:
-            pass
-        else:
-            with this_file:
-                for line in this_file:
-                    fields = line.split(',')
-
-                    # Parse timestamp and host to determine if we need this sample
-                    timestamp = datetime.fromtimestamp(int(fields[0]))
-                    host = fields[1]
-                    time_gap = (timestamp - last_sample[host]['timestamp']).total_seconds()
-                    
-                    # Check if sample is in plot range
-                    if start_date < timestamp < end_date:
-                        # Count this sample. Value will be accumulated for each sensor in the sensor loop.
-                        #last_sample[host]['count'] += 1
-                        
-                        # For each sensor value field that isn't empty, accumulate
-                        last_sample[host]['accumulator'] += Counter({sensor['key']:float(fields[sensor['index']]) for sensor in sensors if fields[sensor['index']]})
-                        last_sample[host]['count'] += Counter({sensor['key']:1 for sensor in sensors if fields[sensor['index']]})
-
-                        # Check if it's time to plot
-                        if time_gap > period / resolution:
-                            # Iterate over the sensors, and append to plot data where data is present
-                            for sensor in sensors:
-                                # Insert a blank sample if it's been more than 2 sample gaps since the last sample to break the line
-                                if time_gap > 2 * max(period / resolution, expected_gap):
-                                    data.setdefault(sensor['key'],{}).setdefault(host,[]).append((None, None))
-                                        
-                                # Add the average value to the plot data, then reset the accumulator
-                                if last_sample[host]['count'][sensor['key']] > 0:
-                                    data.setdefault(sensor['key'],{}).setdefault(host,[]).append(
-                                        (timestamp, last_sample[host]['accumulator'][sensor['key']] / last_sample[host]['count'][sensor['key']])
-                                    )
-                                    last_sample[host]['accumulator'][sensor['key']] = 0.0
-                                    last_sample[host]['count'][sensor['key']] = 0
-                        
-                            last_sample[host]['timestamp'] = timestamp
-        
+        this_filename = f"/var/log/temp-humi-{this_date.strftime('%Y-%m-%d')}.dat"
+        app.logger.info(f"data file => {this_filename}")
+        if os.path.isfile(this_filename):
+            app.logger.info("data file is a file")
+            data = pd.concat([data, pd.read_csv(
+                this_filename,
+                header=None,
+                names=('timestamp', 'host', 'temp', 'temp_u', 'humi', 'humi_u', 'batt', 'batt_u', 'press', 'press_u'),
+                usecols=('timestamp', 'host', 'temp', 'humi', 'press'),
+                parse_dates=['timestamp'],
+                date_parser=lambda x: datetime.fromtimestamp(int(x)),
+                dtype={'temp':float, 'humi':float, 'press':float}
+                )])
         this_date += timedelta(days=1)
+    
+    # Prune data
+    data = data[data['timestamp'].between(start_date, end_date)]
     
     # Compute X-axis labels based on period
     xlabel = start_date
@@ -126,10 +108,15 @@ def index():
             y_labels=sensor['ylabels'],
             style=style)
         
-        for host in data[sensor['key']].keys():
+        for host in hosts.keys():
             charts[sensor['key']].add(
                 hosts[host]['name'], 
-                data[sensor['key']][host], 
+                list(data
+                     .loc[data['host'] == host, ['timestamp',sensor['key']]]
+                     .resample('1H', on='timestamp')
+                     .mean()
+                     .fillna(value=0)
+                     .itertuples()),
                 show_dots=False, 
                 allow_interruptions=True)
     
