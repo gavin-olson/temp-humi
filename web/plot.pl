@@ -35,8 +35,8 @@ my $this_time = time;
 print STDERR sprintf("Read CGI parameters: %fs\n", $this_time-$last_time );
 $last_time = $this_time;
 
-$offset = 0;
-$range = 86400;
+#$offset = 0;
+#$range = 86400;
 
 my $date_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d');
 my $datetime_formatter = DateTime::Format::Strptime->new(pattern => '%Y-%m-%d-%H:%M:%S');
@@ -59,37 +59,15 @@ my %data;
 for my $date (@dates) {
 	open my $file, '<', "/var/log/temp-humi-$date.dat" or next;
 	while(<$file>) {
-		my (
-			$timestamp,
-			$hostname,
-			$temp,
-			undef,
-			$humidity,
-			undef,
-			$battery,
-			undef,
-			$pressure,
-			undef
-		) = split ',';
-		
-		if($temp ne '') {
-			push @{$data{'temp'}{$hostname}}, {
-				'timestamp' => $timestamp,
-				'value'     => $temp
-			};
-		}
-		if($humidity ne '') {
-			push @{$data{'humidity'}{$hostname}}, {
-				'timestamp' => $timestamp,
-				'value'     => $humidity
-			};
-		}
-		if($pressure ne '') {
-			push @{$data{'pressure'}{$hostname}}, {
-				'timestamp' => $timestamp,
-				'value'     => $pressure
-			};
-		}
+		my @fields = split ',';
+	    push @{$data{$fields[1]}}, {
+			#'timestamp' => $datetime_formatter->parse_datetime($fields[0]),
+			'timestamp' => $fields[0],
+		    'temp'      => $fields[2],
+		    'humidity'  => $fields[4],
+		    'battery'   => $fields[6],
+		    'pressure'  => $fields[8]
+		};
 	}
 }
 
@@ -126,11 +104,10 @@ for my $field ('temp', 'humidity', 'pressure') {
 	);
 
 	my @datasets;
-	for my $host (sort keys %hostnames) {
-		my @field_data = map { $_->{'value'} } @{$data{$field}{$host}};
-		my @timestamp_data = map { $_->{'timestamp'} } @{$data{$field}{$host}};
-		
-		#print STDERR join ',',@field_data;
+	for my $host (sort keys %data) {
+		my @series_data = grep { $_->{$field} ne '' } @{$data{$host}};
+		my @field_data = map { $_->{$field} } @series_data;
+		my @timestamp_data = map { $_->{'timestamp'} } @series_data;
 		
 		if(@field_data > 0) {
 			push @datasets, Chart::Gnuplot::DataSet->new(
